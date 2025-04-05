@@ -6,4 +6,4 @@
 ![](https://github.com/BenaribIlyes/seam_carving_project/actions/workflows/3-open-a-pull-request.yml/badge.svg)
 ![](https://github.com/BenaribIlyes/seam_carving_project/actions/workflows/4-merge-your-pull-request.yml/badge.svg)
 
-
+This will be a quick implementation of the seam carving algorithm using python
