@@ -1,7 +1,17 @@
 # Import necessary libraries
+
+# For the seam carving algorithm
 import cv2 # type: ignore
 import numpy as np
 import matplotlib.pyplot as plt
+
+#For the entropy energy map
+from skimage.filters import rank
+from skimage.morphology import disk
+
+# For the HoG energy map
+from skimage.feature import hog
+from skimage.color   import rgb2gray
 
 
 class SeamCarver:
@@ -9,7 +19,7 @@ class SeamCarver:
         self.image = image.astype(np.float32)
         self.history = []  # To store removed seams
 
-    def compute_energy(self, method='l1') -> np.ndarray:
+    def compute_energy(self, method: str = 'l1') -> np.ndarray:
         """
         Compute the energy map of the current image.
         Supported methods: 'sobel', 'l1', 'l2', 'entropy', 'hog', ...
@@ -71,19 +81,41 @@ class SeamCarver:
                     # Energie eHoG
                     eHoG[y, x] = (mag[y, x]) / max_hist
             energy = eHoG
-    
+
+        elif method == 'skimage_entropy':
+            gray_u8 = gray  # already uint8
+            ent = rank.entropy(gray_u8, disk(5))  # 11×11 window
+            energy = ent.astype(np.float64)
+
+        elif method == 'skimage_HoG':
+            gray_f = rgb2gray(self.image.astype(np.uint8))
+            hog_feats, _ = hog(
+                gray_f,
+                orientations=12,
+                pixels_per_cell=(16,16),
+                cells_per_block=(1,1),
+                block_norm='L2-Hys',
+                visualize=True,
+                feature_vector=False
+            )
+            local_max = np.max(hog_feats[...,0,0,:], axis=-1)
+            denom = cv2.resize(local_max, (gray.shape[1], gray.shape[0]),
+                            interpolation=cv2.INTER_NEAREST)
+            gx = cv2.Sobel(gray_f, cv2.CV_64F, 1, 0)
+            gy = cv2.Sobel(gray_f, cv2.CV_64F, 0, 1)
+            mag = np.hypot(gx, gy)
+            energy=  mag / (denom + 1e-6)
         else:
             raise ValueError(f"compute_energy: méthode inconnue '{method}'")
-
-
+        
         return energy
 
-    def find_seam(self,image, orientation='vertical') -> np.ndarray:
+    def find_seam(self, image: np.ndarray, energy: np.ndarray, orientation: str = 'vertical') -> np.ndarray:
         """
         Find the minimal-energy seam in the given orientation.
         Returns an array of indices (row -> col) for vertical, or (col -> row) for horizontal.
         """
-        energy = self.compute_energy() # Compute the energy of the image, here we do it for all but doing it localy will be better (for only around the seams left)
+         #  Here we compute the energy for all the image every tiùe but doing it localy will be better (for only around the seams left)
         if orientation == 'horizontal':
             energy = energy.T
         rows, cols = energy.shape
@@ -120,7 +152,7 @@ class SeamCarver:
             
         return seam
 
-    def remove_seam(self,image, seam: np.ndarray):
+    def remove_seam(self,image: np.ndarray, seam: np.ndarray) -> np.ndarray:
         """
         Remove the seam from the image.
         """
@@ -134,26 +166,27 @@ class SeamCarver:
 
         return new_image       
 
-    def seam_carve(self, num_seams: int, method='l1'):
+    def seam_carve(self, num_seams: int, method: str = 'l1', orientation: str = 'vertical') -> np.ndarray:
         """
         Découpe num_seams coutures verticales dans self.image.
         Retourne l'image retarotée.
         """
         for _ in range(num_seams):
-            # 1) Calculer l'énergie de l'image **actuelle**
+            # 1) Compute the energy map
             energy = self.compute_energy(method)
 
             # 2) Trouver le seam sur cette énergie
-            seam = self.find_seam(self.image, energy, orientation='vertical')
+
+            seam = self.find_seam(self.image, energy)  # orientation prendra la valeur par défaut 'vertical'
+
 
             # 3) Sauvegarder si besoin
             self.history.append(seam)
 
             # 4) Supprimer ce seam de self.image
-            self.image = self.remove_seam(self.image, seam, orientation='vertical')
+            self.image = self.remove_seam(self.image, seam)
 
         return self.image
-
 
 
     #def insert(self, num_seams: int, orientation='vertical', method='sobel'):
