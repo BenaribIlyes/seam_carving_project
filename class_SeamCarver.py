@@ -238,6 +238,40 @@ class SeamCarver:
             gy = cv2.Sobel(gray_f, cv2.CV_64F, 0, 1)
             mag = np.hypot(gx, gy)
             energy=  mag / (denom + 1e-6)
+        
+        elif method == 'saliency':
+            # Création du détecteur de saillance
+            saliency_detector = cv2.saliency.StaticSaliencySpectralResidual_create()
+
+            # Calcul de la carte de saillance
+            success, saliencyMap = saliency_detector.computeSaliency(self.image)
+
+            if not success:
+                    raise RuntimeError("Échec du calcul de la carte de saillance.")
+
+            # Normalisation
+            saliencyMap = (saliencyMap * 255).astype("uint8")
+
+            # Conversion en float64 pour être cohérent avec les autres méthodes
+            energy = saliencyMap.astype(np.float64)
+
+        elif method == 'combined_sobel_saliency':
+             # 1. Sobel (norme L2)
+            gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0)
+            gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1)
+            sobel_energy = gx**2 + gy**2
+
+            # 2. Saliency
+            saliency_detector = cv2.saliency.StaticSaliencySpectralResidual_create()
+            success, saliencyMap = saliency_detector.computeSaliency(self.image)
+            if not success:
+                raise RuntimeError("Erreur lors du calcul de la carte de saillance.")
+            saliencyMap = (saliencyMap * 255).astype("float64")
+
+             # 3. Fusion linéaire
+            energy = 0.5 * sobel_energy + 0.5 * saliencyMap
+
+
         else:
             raise ValueError(f"compute_energy: méthode inconnue '{method}'")
         
@@ -318,7 +352,7 @@ class SeamCarver:
 
         return self.image
 
-    def show_history(self):
+    def show_history(self, seam: np.ndarray) -> None:
         """
         Show the history of removed seams.
         """ 
@@ -327,3 +361,78 @@ class SeamCarver:
             plt.plot(seam, range(len(seam)), 'r-')
             plt.title(f"Seam {i+1}")
             plt.show()
+
+    def find_best_seam(self, seam: np.ndarray, energy: np.ndarray) -> None:
+        """
+        Find the best seam to remove between the horizontal and vertical seams.
+        """
+        # Compute each seam
+        seam_vertical = self.find_seam(self.image, seam, orientation=0)
+        seam_horizontal = self.find_seam(self.image, seam, orientation=1)
+        # Choose the best seam to remove
+        seam_to_remove = seam_vertical if seam_vertical.sum() < seam_horizontal.sum() else seam_horizontal
+        kind = 'vertical' if seam_vertical.sum() < seam_horizontal.sum() else 'horizontal'
+        
+        return seam_to_remove, kind
+    
+    def seam_carve_optimal(self, num_seams: int, method: str = 'l1') -> np.ndarray:
+        """
+        Découpe num_seams coutures verticales dans self.image.
+        Retourne l'image retarotée.
+        """
+        for _ in range(num_seams):
+            # 1) Compute the energy map
+            energy = self.compute_energy(method)
+            # 2) Find the best seam to remove beween the horizontal and vertical seams
+            seam,kind = self.find_best_seam(self, seam)
+            # 3) Store the seam in self.history
+            self.history.append(seam)
+            # 4) Remove the seam from the image
+            self.image = self.remove_seam(self.image, seam, kind)
+            # 5) Show the seam on the image
+            self.show_history(self.image, seam)
+
+        return self.image
+    
+    def add_seam(self, image: np.ndarray, seam: np.ndarray, orientation: int) -> np.ndarray:
+        """
+        Add the seam to the image.
+        """
+        rows, cols, _ = image.shape
+        new_image = np.zeros((rows, cols + 1, 3), dtype=image.dtype)
+
+        if orientation == 0:
+            for i in range(rows):
+                j = seam[i]
+                new_image[i, :j] = image[i, :j]
+                new_image[i, j] = image[i, j]
+                new_image[i, j + 1:] = image[i, j:]
+        elif orientation == 1:
+            for j in range(cols):
+                i = seam[j]
+                new_image[:i, j] = image[:i, j]
+                new_image[i, j] = image[i, j]
+                new_image[i + 1:, j] = image[i:, j]
+        else:
+            print("Error: orientation must be 0 (vertical) or 1 (horizontal)")
+        return new_image
+
+    def upsize(self, nums_seams: int, method: str = 'l1', orientation: str = 'vertical') -> np.ndarray:
+        """
+        Upsize the image by adding num_seams seams.
+        """
+        for _ in range(nums_seams):
+            # 1) Compute the energy map
+            energy = self.compute_energy(method)
+            # 2) Find the seam
+            orientation_flag = 0 if orientation == 'vertical' else 1
+            seam = self.find_seam(self.image, energy, orientation=orientation_flag)
+            # 3) Store the seam in self.history
+            self.history.append(seam)
+            # 4) Add the seam to the image
+            self.image = self.add_seam(self.image, seam, orientation=orientation_flag)
+            # 5) Show the seam on the image
+            #self.show_history(self.image, seam)
+
+        return self.image
+    
