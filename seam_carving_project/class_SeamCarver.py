@@ -399,15 +399,16 @@ class SeamCarver:
         Add the seam to the image.
         """
         rows, cols, _ = image.shape
-        new_image = np.zeros((rows, cols + 1, 3), dtype=image.dtype)
 
         if orientation == 0:
-            for i in range(rows):
+            new_image = np.zeros((rows, cols + 1, 3), dtype=image.dtype)
+            for i in range(rows):                
                 j = seam[i]
                 new_image[i, :j] = image[i, :j]
                 new_image[i, j] = image[i, j]
                 new_image[i, j + 1:] = image[i, j:]
         elif orientation == 1:
+            new_image = np.zeros((rows+1, cols, 3), dtype=image.dtype)
             for j in range(cols):
                 i = seam[j]
                 new_image[:i, j] = image[:i, j]
