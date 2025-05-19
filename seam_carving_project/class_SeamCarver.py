@@ -293,7 +293,7 @@ class SeamCarver:
         dp[0] = energy[0] # The first row is just the energy of the first row
 
         for i in range(1, rows):
-                for j in range(cols):
+                for j in range(cols):                    
                     if j == 0: ## If we are at the first column
                         dp[i][j] = energy[i][j] + min(dp[i-1][j], dp[i-1][j+1])
                     elif j == cols - 1: ## If we are at the last column
@@ -400,42 +400,47 @@ class SeamCarver:
         """
         rows, cols, _ = image.shape
 
-        if orientation == 0:
+        if orientation == 0:  # vertical
             new_image = np.zeros((rows, cols + 1, 3), dtype=image.dtype)
-            for i in range(rows):                
+            for i in range(rows):
                 j = seam[i]
-                new_image[i, :j] = image[i, :j]
-                new_image[i, j] = image[i, j]
-                new_image[i, j + 1:] = image[i, j:]
-        elif orientation == 1:
-            new_image = np.zeros((rows+1, cols, 3), dtype=image.dtype)
+                for c in range(3):
+                    new_image[i, :j+1, c] = image[i, :j+1, c]
+                    new_image[i, j+1, c] = image[i, j, c]  # Duplicate the seam pixel
+                    new_image[i, j+2:, c] = image[i, j + 1:, c] # Copy the pixels to the right of the seam
+
+
+        elif orientation == 1:  # horizontal
+            new_image = np.zeros((rows + 1, cols, 3), dtype=image.dtype)
             for j in range(cols):
                 i = seam[j]
-                new_image[:i, j] = image[:i, j]
-                new_image[i, j] = image[i, j]
-                new_image[i + 1:, j] = image[i:, j]
+                for c in range(3):
+                    new_image[:i+1, j, c] = image[:i+1, j, c]
+                    new_image[i+1, j, c] = image[i, j, c]  # Duplicate the seam pixel
+                    new_image[i+2:, j, c] = image[i+1:, j, c] # Copy the pixels below the seam
+
         else:
             print("Error: orientation must be 0 (vertical) or 1 (horizontal)")
         return new_image
 
-    def upsize(self, nums_seams: int, method: str = 'l1', orientation: str = 'vertical') -> np.ndarray:
+    def upsize(self,image: np.ndarray, nums_seams: int, method: str = 'l1', orientation: str = 'vertical') -> np.ndarray:
         """
         Upsize the image by adding num_seams seams.
         """
-        for _ in range(nums_seams):
-            # 1) Compute the energy map
-            energy = self.compute_energy(method)
-            # 2) Find the seam
-            orientation_flag = 0 if orientation == 'vertical' else 1
-            seam = self.find_seam(self.image, energy, orientation=orientation_flag)
-            # 3) Store the seam in self.history
-            self.history.append(seam)
-            # 4) Add the seam to the image
-            self.image = self.add_seam(self.image, seam, orientation=orientation_flag)
-            # 5) Show the seam on the image
-            #self.show_history(self.image, seam)
+        rows, cols, _ = image.shape
+        # 1) Call of seam_carve to get the seam
+        reduced_image = self.seam_carve(nums_seams, method=method, orientation=orientation)
+        # 2) Add the seam of history to the image
+        orientation_flag = 0 if orientation == 'vertical' else 1
+        if orientation_flag == 0:
+            new_image = np.zeros((rows + nums_seams, cols, 3), dtype=image.dtype)    
+        else :
+            new_image = np.zeros((rows, cols + nums_seams, 3), dtype=image.dtype)
+        for seam in self.history:
+            new_image = self.add_seam(image, seam, orientation=orientation_flag)
 
-        return self.image
+
+        return new_image
     
 def compare_saliency_preservation(original: np.ndarray, reduced_images: dict) -> dict:
     """
