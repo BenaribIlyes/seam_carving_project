@@ -1,4 +1,21 @@
+# Environnements virtuels
 venv/
+.env
+
+# Python cache
 __pycache__/
-.ipynb_checkpoints/
 *.pyc
+
+# Fichiers temporaires et journaux
+*.log
+*.tmp
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Systèmes d'exploitation
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
