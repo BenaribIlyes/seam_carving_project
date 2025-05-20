@@ -22,28 +22,43 @@ from skimage.color   import rgb2gray
 
 # Extrcation of the remove_seam function to use Numba
 @njit
-def remove_seam_numba(image: np.ndarray, seam: np.ndarray, orientation:  str = 'vertical') -> np.ndarray:
-    rows, cols, _ = image.shape
+def remove_seam_numba(image: np.ndarray, seam: np.ndarray, orientation: str = 'vertical') -> np.ndarray:
 
-    if orientation == 'vertical':  # vertical
-        new_image = np.zeros((rows, cols - 1, 3), dtype=image.dtype)
-        for i in range(rows):
-            j = seam[i]
-            for c in range(3):
-                new_image[i, :j, c] = image[i, :j, c]
-                new_image[i, j:, c] = image[i, j + 1:, c]
-
-    elif orientation == 'horizontal':  # horizontal
-        new_image = np.zeros((rows - 1, cols, 3), dtype=image.dtype)
-        for j in range(cols):
-            i = seam[j]
-            for c in range(3):
-                new_image[:i, j, c] = image[:i, j, c]
-                new_image[i:, j, c] = image[i + 1:, j, c]
-
-    else:
-        raise ValueError("orientation must be 0 (vertical) or 1 (horizontal)")
-
+    if image.ndim == 2:
+        rows, cols = image.shape
+        if orientation == 'vertical':
+            new_image = np.zeros((rows, cols - 1), dtype=image.dtype)
+            for i in range(rows):
+                j = seam[i]
+                new_image[i, :j] = image[i, :j]
+                new_image[i, j:] = image[i, j + 1:]
+        elif orientation == 'horizontal':
+            new_image = np.zeros((rows - 1, cols), dtype=image.dtype)
+            for j in range(cols):
+                i = seam[j]
+                new_image[:i, j] = image[:i, j]
+                new_image[i:, j] = image[i + 1:, j]
+        else:
+            raise ValueError("orientation must be 'vertical' or 'horizontal'")
+    else:  # RGB image
+        rows, cols, _ = image.shape
+        if orientation == 'vertical':
+            new_image = np.zeros((rows, cols - 1, 3), dtype=image.dtype)
+            for i in range(rows):
+                j = seam[i]
+                for c in range(3):
+                    new_image[i, :j, c] = image[i, :j, c]
+                    new_image[i, j:, c] = image[i, j + 1:, c]
+        elif orientation == 'horizontal':
+            new_image = np.zeros((rows - 1, cols, 3), dtype=image.dtype)
+            for j in range(cols):
+                i = seam[j]
+                for c in range(3):
+                    new_image[:i, j, c] = image[:i, j, c]
+                    new_image[i:, j, c] = image[i + 1:, j, c]
+        else:
+            raise ValueError("orientation must be 'vertical' or 'horizontal'")
+    
     return new_image
 
 # Compute the HoG energy map
@@ -106,6 +121,40 @@ def compute_hog_custom_parallel(gray: np.ndarray, win_size: int = 15, nbins: int
         eHoG[y, x] = val
 
     return eHoG
+
+def compare_saliency_preservation(original: np.ndarray, reduced_images: dict) -> dict:
+    """
+    Compare la préservation de la saillance entre l'image originale et plusieurs versions réduites.
+
+    Args:
+        original (np.ndarray): Image d'origine.
+        reduced_images (dict): Dictionnaire {nom_méthode: image_réduite}.
+
+    Returns:
+       dict: Dictionnaire {nom_méthode: score}.
+    """
+    # Utilise compute_energy de SeamCarver pour obtenir la carte de saillance
+    sc_ref = SeamCarver(original.copy())
+    saliency_orig = sc_ref.compute_energy('saliency')  # le nom de méthode doit être 'saliency' (tout en minuscule)
+
+    results = {}
+
+    for label, reduced in reduced_images.items():
+        # Redimensionner la carte de saillance à la taille réduite
+        saliency_resized = cv2.resize(saliency_orig, (reduced.shape[1], reduced.shape[0]))
+        # Convertir l'image réduite en niveaux de gris
+        gray_reduced = cv2.cvtColor(reduced, cv2.COLOR_BGR2GRAY)
+
+        # Produit pondéré : approximation du chevauchement entre salience et contraste
+        score = np.sum((gray_reduced / 255.0) * (saliency_resized / 255.0))
+
+        results[label] = score
+
+        #   Affichage des scores
+        for label, score in sorted(results.items(), key=lambda x: x[1], reverse=True):
+            print(f"{label:25s} → score de saillance préservée : {score:.2f}")
+
+    return results
 
 
 class SeamCarver:
@@ -280,13 +329,13 @@ class SeamCarver:
         
         return energy
 
-    def find_seam(self, image: np.ndarray, energy: np.ndarray, orientation: int = 1) -> np.ndarray:
+    def find_seam(self, image: np.ndarray, energy: np.ndarray, orientation: str) -> np.ndarray:
         """
         Find the minimal-energy seam in the given orientation.
         Returns an array of indices (row -> col) for vertical, or (col -> row) for horizontal.
         """
          #  Here we compute the energy for all the image every tiùe but doing it localy will be better (for only around the seams left)
-        if orientation == 1: # horizontal
+        if orientation == 'horizontal': # horizontal
             energy = np.transpose(energy)
             image = np.transpose(image)
     
@@ -344,11 +393,11 @@ class SeamCarver:
             energy = self.compute_energy(method)
             # 2) Find the seam
             orientation_flag = 0 if orientation == 'vertical' else 1
-            seam = self.find_seam(self.image, energy, orientation=orientation_flag)
+            seam = self.find_seam(self.image, energy, orientation)
             # 3) Store the seam in self.history
             self.history.append(seam)
             # 4) Remove the seam from the image
-            self.image = self.remove_seam(self.image, seam, orientation=orientation_flag)
+            self.image = self.remove_seam(self.image, seam, orientation)
             # 5) Show the seam on the image
             #self.show_history(self.image, seam)
 
@@ -402,26 +451,44 @@ class SeamCarver:
         Add the seam to the image.
         """
         rows, cols, _ = image.shape
-        cpt = 0
 
         if orientation =='vertical':  # vertical
             new_image = np.zeros((rows, cols + 1, 3), dtype=image.dtype)
             for i in range(rows):
                 j = seam[i]
                 for c in range(3):
-                    new_image[i, :j+1, c] = image[i, :j+1, c]
-                    new_image[i, j+1, c] = image[i, j, c]  # Duplicate the seam pixel
-                    new_image[i, j+2:, c] = image[i, j + 1:, c] # Copy the pixels to the right of the seam
-
+                    if j == 0:
+                        # Bord gauche
+                        new_image[i, 0, c] = image[i, 0, c]
+                        new_image[i, 1:, c] = image[i, :, c]
+                    elif j >= cols - 1:
+                        # Bord droit OU dépassement
+                        new_image[i, :cols, c] = image[i, :, c]
+                        new_image[i, cols, c] = image[i, cols - 1, c]
+                    else:
+                        # Cas normal
+                        new_image[i, :j+1, c] = image[i, :j+1, c]
+                        new_image[i, j+1, c] = image[i, j, c]
+                        new_image[i, j+2:, c] = image[i, j+1:, c]
 
         elif orientation == 'horizontal':  # horizontal
             new_image = np.zeros((rows + 1, cols, 3), dtype=image.dtype)
             for j in range(cols):
                 i = seam[j]
                 for c in range(3):
-                    new_image[:i+1, j, c] = image[:i+1, j, c]
-                    new_image[i+1, j, c] = image[i, j, c]  # Duplicate the seam pixel
-                    new_image[i+2:, j, c] = image[i+1:, j, c] # Copy the pixels below the seam
+                    if i == 0:
+                        # Bord gauche
+                        new_image[0, j, c] = image[0, j, c]
+                        new_image[1:, j, c] = image[:, j, c]
+                    elif i >= rows - 1:
+                        # Bord droit OU dépassement
+                        new_image[:rows, j, c] = image[:, j, c]
+                        new_image[rows, j, c] = image[rows - 1, j, c]
+                    else:
+                        # Cas normal
+                        new_image[:i+1, j, c] = image[:i+1, j, c]
+                        new_image[i+1, j, c] = image[i, j, c]  # Duplicate the seam pixel
+                        new_image[i+2:, j, c] = image[i+1:, j, c] # Copy the pixels below the seam
 
         else:
             print("Error: orientation must be 0 (vertical) or 1 (horizontal)")
@@ -433,7 +500,10 @@ class SeamCarver:
         """
         history = self.collect_seams(num_seams, method, orientation)
         new_image = image.copy()
-        décalage_indice =  np.zeros((image.shape[0],), dtype=int)
+        if orientation == 'vertical':
+            décalage_indice =  np.zeros((image.shape[0],), dtype=int)
+        else : 
+            décalage_indice =  np.zeros((image.shape[1],), dtype=int)
 
 
         for _ in range(num_seams):
@@ -451,41 +521,6 @@ class SeamCarver:
 
         return new_image
     
-    def compare_saliency_preservation(original: np.ndarray, reduced_images: dict) -> dict:
-        """
-        Compare la préservation de la saillance entre l'image originale et plusieurs versions réduites.
-
-        Args:
-            original (np.ndarray): Image d'origine.
-            reduced_images (dict): Dictionnaire {nom_méthode: image_réduite}.
-
-        Returns:
-            dict: Dictionnaire {nom_méthode: score}.
-        """
-        # Utilise compute_energy de SeamCarver pour obtenir la carte de saillance
-        sc_ref = SeamCarver(original.copy())
-        saliency_orig = sc_ref.compute_energy('saliency')  # ⚠️ le nom de méthode doit être 'saliency' (tout en minuscule)
-
-        results = {}
-
-        for label, reduced in reduced_images.items():
-            # Redimensionner la carte de saillance à la taille réduite
-            saliency_resized = cv2.resize(saliency_orig, (reduced.shape[1], reduced.shape[0]))
-
-            # Convertir l'image réduite en niveaux de gris
-            gray_reduced = cv2.cvtColor(reduced, cv2.COLOR_BGR2GRAY)
-
-            # Produit pondéré : approximation du chevauchement entre salience et contraste
-            score = np.sum((gray_reduced / 255.0) * (saliency_resized / 255.0))
-
-            results[label] = score
-
-            #   Affichage des scores
-            print("\nComparaison de la préservation de la saillance :")
-            for label, score in sorted(results.items(), key=lambda x: x[1], reverse=True):
-                print(f"{label:25s} → score de saillance préservée : {score:.2f}")
-
-        return results
 
     def collect_seams(self, num_seams:int, method:str='l1', orientation:str='vertical'):
         """
@@ -501,3 +536,29 @@ class SeamCarver:
         # On stocke ces seams *dans l'ordre d'extraction*
         return history
 
+    def remove_object(self,image: np.ndarray, mask: np.ndarray, method: str = 'l1', orientation: str = 'vertical') -> np.ndarray:
+        """
+        Découpe les coutures verticales dans self.image en fonction du masque.
+        L'idée est de mettre à une énergie très basse tous les pixels du mask détouré, et de continuer à enlever des seams tant qu'il reste des pixels dans le masque.
+        """
+
+        new_image1 = image.copy()
+        while np.any(mask == 255): # Tant qu'il y a des pixels de l'objet à enlever (mis à 255 dans le mask)
+            energy = self.compute_energy(method, new_image1)
+            energy[mask == 255] = -1e6 # On met l'énergie des éléments de l'objets à une valeur extrêmement basse pour être sûrs que l'algo passe par ce point
+            seam = self.find_seam(new_image1, energy, orientation)
+            new_image1 = self.remove_seam(new_image1, seam, orientation)
+            mask = self.remove_seam(mask,seam,orientation)
+
+        # L'objet est enlevé, maintenant on scale up pour revenir aux dimensions initiales de l'image
+
+        rows,cols,_ = image.shape
+        new_rows, new_cols,_ = new_image1.shape
+
+        num_seams = (rows - new_rows) + (cols - new_cols)
+
+        new_image2 = self.upsize(new_image1, num_seams, method, orientation) 
+
+        
+
+        return new_image1,new_image2
