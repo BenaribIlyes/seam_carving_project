@@ -19,3 +19,8 @@ Thumbs.db
 
 # VSCode
 .vscode/
+
+#Pour activer venv (NE PAS SUPPRIMER)
+# Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# .\venv\Scripts\Activate.ps1
