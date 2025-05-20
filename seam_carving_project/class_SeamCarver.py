@@ -316,20 +316,6 @@ class SeamCarver:
             
         return seam
 
-#   def remove_seam(self,image: np.ndarray, seam: np.ndarray) -> np.ndarray:
-#        """
-#        Remove the seam from the image.
-#        """
-#        rows, cols, _ = image.shape # Get the dimensions of the image
-#        new_image = np.zeros((rows, cols - 1, 3), dtype=image.dtype) # Create a new image with one less column
-#
-#       for i in range(rows):
-#            j = seam[i]
-#            new_image[i, :j] = image[i, :j] # Copy the pixels to the left of the seam
-#            new_image[i, j:] = image[i, j + 1:] # Copy the pixels to the right of the seam
-#
-#        return new_image 
-
     def remove_seam(self, image: np.ndarray, seam: np.ndarray, orientation: int) -> np.ndarray:
         return remove_seam_numba(image, seam, orientation)       
 
@@ -454,27 +440,40 @@ class SeamCarver:
 
     def upsize(self, image: np.ndarray, num_seams: int, method: str = 'l1', orientation: str = 'vertical') -> np.ndarray:
         """
-        Upsize the image by adding num_seams seams.
+        Upsize the image by adding num_seams seams (duplication de coutures minimales).
         """
         history = self.collect_seams(num_seams, method, orientation)
         new_image = image.copy()
 
-        rows = new_image.shape[0] if orientation == 'vertical' else new_image.shape[1]
-
-        # Créer une table de mappage pour suivre l'évolution des indices
-        mapping = [np.arange(new_image.shape[1 if orientation == 'vertical' else 0]) for _ in range(rows)]
+        # Correction: convertir orientation string -> int et ajout de la variable décalage_indice selon l'orientation
         orientation_flag = 0 if orientation == 'vertical' else 1
+        if orientation_flag == 0: # vertical
+            décalage_indice = np.zeros((image.shape[0],), dtype=int)
+        else: # horizontal
+            décalage_indice = np.zeros((image.shape[1],), dtype=int)
 
-        for seam in reversed(history):
-            seam = np.array(seam)
-            adjusted_seam = np.zeros_like(seam)
-            for i in range(rows):
-                adjusted_seam[i] = mapping[i][seam[i]]
-                mapping[i] = np.insert(mapping[i], seam[i] + 1, mapping[i][seam[i]])
 
-            new_image = self.add_seam(new_image, adjusted_seam, orientation_flag)
+        for _ in range(num_seams):
+            seam = np.array(history.pop()) + décalage_indice
+
+            # Correction: vérifier la borne correcte selon l’orientation
+            if all(0 <= seam[i] < new_image.shape[1] for i in range(len(seam))):
+                # Correction: passer orientation_flag (int) à add_seam()
+                new_image = self.add_seam(new_image, seam, orientation_flag)
+            else:
+                raise ValueError("Seam contains indices out of bounds for the current image dimensions.")
+
+            # Correction : mise à jour des décalages selon la bonne dimension
+            for i in range(len(décalage_indice)):
+                if orientation == 'vertical':
+                    if 0 <= seam[i] < new_image.shape[1] - 1:
+                        décalage_indice[i] += 1
+                else:
+                    if 0 <= seam[i] < new_image.shape[0] - 1:
+                        décalage_indice[i] += 1
 
         return new_image
+
 
 
     
