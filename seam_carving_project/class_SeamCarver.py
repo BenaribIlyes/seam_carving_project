@@ -113,12 +113,14 @@ class SeamCarver:
         self.image = image.astype(np.float32)
         self.history = []  # To store removed seams
 
-    def compute_energy(self, method: str = 'l1') -> np.ndarray:
+    def compute_energy(self, method: str = 'l1',image : np.ndarray =None) -> np.ndarray:
         """
         Compute the energy map of the current image.
         Supported methods: 'sobel', 'l1', 'l2', 'entropy', 'hog', ...
         """
-        gray = cv2.cvtColor(self.image.astype(np.uint8), cv2.COLOR_BGR2GRAY)
+        if image is None:
+            image = self.image
+        gray = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2GRAY)
         if method == 'l1':
             gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0)
             gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1)
@@ -347,20 +349,30 @@ class SeamCarver:
             # 4) Remove the seam from the image
             self.image = self.remove_seam(self.image, seam, orientation=orientation_flag)
             # 5) Show the seam on the image
-            #self.show_history(self.image, seam)
-
-
-        return self.image
-
-    def show_history(self, seam: np.ndarray) -> None:
+ 
+    
+    def show_removed_seams(self, original_image: np.ndarray, orientation: str = 'vertical'):
         """
-        Show the history of removed seams.
-        """ 
-        for i, seam in enumerate(self.history):
-            plt.imshow(self.image.astype(np.uint8))
-            plt.plot(seam, range(len(seam)), 'r-')
-            plt.title(f"Seam {i+1}")
-            plt.show()
+        Affiche toutes les coutures supprimées en rouge sur l'image originale.
+        Args:
+            original_image (np.ndarray): L'image d'origine (avant suppression des coutures).
+            orientation (str): 'vertical' ou 'horizontal'.
+        """
+        img = original_image.copy()
+        orientation_flag = 0 if orientation == 'vertical' else 1
+
+        for seam in self.history:
+            if orientation_flag == 0:  # vertical
+                for i, j in enumerate(seam):
+                    img[i, j] = [0, 0, 255]  # rouge (BGR)
+            else:  # horizontal
+                for j, i in enumerate(seam):
+                    img[i, j] = [0, 0, 255]  # rouge (BGR)
+
+        plt.imshow(cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_BGR2RGB))
+        plt.title("Seams removed (in red)")
+        plt.axis('off')
+        plt.show()
 
     def find_best_seam(self, seam: np.ndarray, energy: np.ndarray) -> None:
         """
@@ -390,7 +402,7 @@ class SeamCarver:
             # 4) Remove the seam from the image
             self.image = self.remove_seam(self.image, seam, kind)
             # 5) Show the seam on the image
-            self.show_history(self.image, seam)
+        self.show_history(self.image, seam)
 
         return self.image
     
@@ -401,46 +413,70 @@ class SeamCarver:
         rows, cols, _ = image.shape
 
         if orientation == 0:  # vertical
-            new_image = np.zeros((rows, cols + 1, 3), dtype=image.dtype)
+            upscale_image = np.zeros((rows, cols + 1, 3), dtype=image.dtype)
             for i in range(rows):
                 j = seam[i]
                 for c in range(3):
-                    new_image[i, :j+1, c] = image[i, :j+1, c]
-                    new_image[i, j+1, c] = image[i, j, c]  # Duplicate the seam pixel
-                    new_image[i, j+2:, c] = image[i, j + 1:, c] # Copy the pixels to the right of the seam
+                    upscale_image[i, :j+1, c] = image[i, :j+1, c]
+                    upscale_image[i, j+1, c] = image[i, j, c]  # Duplicate the seam pixel
+                    upscale_image[i, j+2:, c] = image[i, j + 1:, c] # Copy the pixels to the right of the seam
 
 
         elif orientation == 1:  # horizontal
-            new_image = np.zeros((rows + 1, cols, 3), dtype=image.dtype)
+            upscale_image = np.zeros((rows + 1, cols, 3), dtype=image.dtype)
             for j in range(cols):
                 i = seam[j]
                 for c in range(3):
-                    new_image[:i+1, j, c] = image[:i+1, j, c]
-                    new_image[i+1, j, c] = image[i, j, c]  # Duplicate the seam pixel
-                    new_image[i+2:, j, c] = image[i+1:, j, c] # Copy the pixels below the seam
+                    upscale_image[:i+1, j, c] = image[:i+1, j, c]
+                    upscale_image[i+1, j, c] = image[i, j, c]  # Duplicate the seam pixel
+                    upscale_image[i+2:, j, c] = image[i+1:, j, c] # Copy the pixels below the seam
 
         else:
             print("Error: orientation must be 0 (vertical) or 1 (horizontal)")
-        return new_image
+        return upscale_image
+    
 
-    def upsize(self,image: np.ndarray, nums_seams: int, method: str = 'l1', orientation: str = 'vertical') -> np.ndarray:
+    def collect_seams(self, num_seams:int, method:str='l1', orientation:str='vertical'):
+        """
+        Sur une copie de l'image d'origine, on détermine le seam minimal puis on l'enleve.
+        """
+        img_copy = self.image.copy()
+        history = []
+        orientation_flag = 0 if orientation == 'vertical' else 1
+        for _ in range(num_seams):
+            energy = self.compute_energy(method, img_copy)
+            seam = self.find_seam(img_copy, energy, orientation_flag)
+            history.append(seam)
+            img_copy = self.remove_seam(img_copy, seam, orientation_flag)
+        # On stocke ces seams *dans l'ordre d'extraction*
+        return history
+
+
+    def upsize(self, image: np.ndarray, num_seams: int, method: str = 'l1', orientation: str = 'vertical') -> np.ndarray:
         """
         Upsize the image by adding num_seams seams.
         """
-        rows, cols, _ = image.shape
-        # 1) Call of seam_carve to get the seam
-        reduced_image = self.seam_carve(nums_seams, method=method, orientation=orientation)
-        # 2) Add the seam of history to the image
-        orientation_flag = 0 if orientation == 'vertical' else 1
-        if orientation_flag == 0:
-            new_image = np.zeros((rows + nums_seams, cols, 3), dtype=image.dtype)    
-        else :
-            new_image = np.zeros((rows, cols + nums_seams, 3), dtype=image.dtype)
-        for seam in self.history:
-            new_image = self.add_seam(image, seam, orientation=orientation_flag)
+        history = self.collect_seams(num_seams, method, orientation)
+        new_image = image.copy()
 
+        rows = new_image.shape[0] if orientation == 'vertical' else new_image.shape[1]
+
+        # Créer une table de mappage pour suivre l'évolution des indices
+        mapping = [np.arange(new_image.shape[1 if orientation == 'vertical' else 0]) for _ in range(rows)]
+        orientation_flag = 0 if orientation == 'vertical' else 1
+
+        for seam in reversed(history):
+            seam = np.array(seam)
+            adjusted_seam = np.zeros_like(seam)
+            for i in range(rows):
+                adjusted_seam[i] = mapping[i][seam[i]]
+                mapping[i] = np.insert(mapping[i], seam[i] + 1, mapping[i][seam[i]])
+
+            new_image = self.add_seam(new_image, adjusted_seam, orientation_flag)
 
         return new_image
+
+
     
 def compare_saliency_preservation(original: np.ndarray, reduced_images: dict) -> dict:
     """
