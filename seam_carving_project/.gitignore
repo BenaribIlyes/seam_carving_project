@@ -1,0 +1,37 @@
+# Environnements virtuels
+venv/
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Fichiers temporaires et journaux
+*.log
+*.tmp
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Systèmes d'exploitation
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+
+# PyCharm
+.idea/
+
+# Ne pas versionner les données brutes
+data/
+
+# Ne pas versionner les datasets du sous-dossier
+seam_carving_project/dataset/
+
+# Ne plus versionner les données CIFAR et autres raw data
+code/data/
+data/
+seam_carving_project/dataset/
+
+

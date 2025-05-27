@@ -1,0 +1,20 @@
+# — Librairies fondamentales —
+torch
+torchvision
+numpy==1.25.2
+scikit-learn
+matplotlib
+opencv-contrib-python
+Pillow
+
+# — Notebook & Jupyter —
+notebook
+jupyterlab
+ipykernel
+ipywidgets
+
+# — Utilitaires divers —
+tqdm
+requests
+
+scikit-image

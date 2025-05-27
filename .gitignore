@@ -1,0 +1,23 @@
+# Environnements virtuels
+env/
+env_backup/
+
+# Données brutes à ignorer
+datas/
+seam_carving_project/CUB_200_2011/
+
+# Cache et temporaires
+__pycache__/
+*.py[cod]
+*.so
+*.log
+*.tmp
+
+# VSCode
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Variables d'environnement
+.env
