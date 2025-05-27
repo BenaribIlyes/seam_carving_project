@@ -117,6 +117,12 @@ bash setup_env.sh
 jupyter lab
 ```
 
+## 🔽 Cloner uniquement la branche `main`
+
+```bash
+git clone --single-branch --branch main https://github.com/BenaribIlyes/seam_carving_project.git
+cd seam_carving_project
+
 ---
 
 **Contribuer**  
